@@ -20,11 +20,9 @@ RENTAL_DURATION = 8 * 60 * 60  # 8 hours in seconds
 PH_TZ = pytz.timezone('Asia/Manila')
 
 def get_ph_time():
-    """Get current Philippine time"""
     return datetime.now(PH_TZ)
 
 def connect_to_database():
-    """Establish database connection"""
     try:
         return pymysql.connect(**DB_CONFIG)
     except pymysql.MySQLError as e:
@@ -32,7 +30,6 @@ def connect_to_database():
         return None
 
 def read_card():
-    """Read RFID card UID"""
     try:
         reader = readers()[0]
         connection = reader.createConnection()
@@ -45,7 +42,6 @@ def read_card():
     return None
 
 def get_user_balance(connection, card_no):
-    """Calculate user's available balance (Top Ups - Deductions)"""
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT iduser FROM user WHERE CardNo = %s", (card_no,))
@@ -74,7 +70,6 @@ def get_user_balance(connection, card_no):
         return None
 
 def get_available_bikes(connection):
-    """Get list of available bikes by checking transactions"""
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -94,11 +89,9 @@ def get_available_bikes(connection):
         print(f"Database error: {e}")
         return []
 
-def process_rental(connection, user_id, card_no):  # 🔧 card_no added
-    """Handle bike rental process"""
+def process_rental(connection, user_id, card_no):
     try:
         with connection.cursor() as cursor:
-            # Check for existing rental
             cursor.execute("""
                 SELECT idtransactions, start_time 
                 FROM transactions 
@@ -112,7 +105,7 @@ def process_rental(connection, user_id, card_no):  # 🔧 card_no added
                     current_time = get_ph_time()
                     cursor.execute("""
                         INSERT INTO Credits 
-                        (userId, mode, Credits, date, user_iduser) 
+                        (userId, mode, Credits, date, user_iduser)
                         VALUES (%s, 'Deduction', %s, %s, %s)
                     """, (card_no, RENTAL_RATE, current_time, user_id))
                     connection.commit()
@@ -122,18 +115,15 @@ def process_rental(connection, user_id, card_no):  # 🔧 card_no added
                     print(f"Bike already rented. {remaining:.1f} hours remaining")
                 return
             
-            # Check available bikes
             available_bikes = get_available_bikes(connection)
             if not available_bikes:
                 print("No bikes available")
                 return
             
-            # Show available bikes
             print("\nAvailable Bikes:")
             for bike in available_bikes:
                 print(f"{bike['idBike']}: {bike['Name']}")
             
-            # Let user select bike
             bike_id = int(input("Enter bike ID to rent: "))
             selected_bike = next((b for b in available_bikes if b['idBike'] == bike_id), None)
             
@@ -141,7 +131,6 @@ def process_rental(connection, user_id, card_no):  # 🔧 card_no added
                 print("Invalid bike selection")
                 return
             
-            # Start new rental
             current_time = get_ph_time()
             cursor.execute("""
                 INSERT INTO transactions 
@@ -149,12 +138,11 @@ def process_rental(connection, user_id, card_no):  # 🔧 card_no added
                 VALUES (%s, %s, %s)
             """, (user_id, bike_id, current_time))
             
-            # Deduct credits immediately
             cursor.execute("""
                 INSERT INTO Credits 
-                (userId, mode, Credits, date, user_iduser) 
-                VALUES (%s, 'Deduction', %s, %s, %s)
-            """, (card_no, RENTAL_RATE, current_time, user_id))
+                (userId, mode, Credits, date, user_iduser, Bike_idBike) 
+                VALUES (%s, 'Deduction', %s, %s, %s, %s)
+            """, (card_no, RENTAL_RATE, current_time, user_id, bike_id))
             
             connection.commit()
             print(f"Bike {selected_bike['Name']} rented successfully at {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -163,8 +151,7 @@ def process_rental(connection, user_id, card_no):  # 🔧 card_no added
     except (ValueError, pymysql.MySQLError) as e:
         print(f"Rental processing error: {e}")
 
-def return_bike(connection, user_id, card_no):  # 🔧 card_no added
-    """Handle bike return process"""
+def return_bike(connection, user_id, card_no):
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -179,13 +166,11 @@ def return_bike(connection, user_id, card_no):  # 🔧 card_no added
                 print("No active rental found for this user")
                 return False
             
-            # Calculate rental duration and cost
             start_time = rental['start_time'].replace(tzinfo=PH_TZ)
             duration = (get_ph_time() - start_time).total_seconds()
             rental_periods = max(1, int(duration // RENTAL_DURATION) + (1 if duration % RENTAL_DURATION > 0 else 0))
             total_cost = rental_periods * RENTAL_RATE
             
-            # Update transaction
             current_time = get_ph_time()
             cursor.execute("""
                 UPDATE transactions 
@@ -195,9 +180,9 @@ def return_bike(connection, user_id, card_no):  # 🔧 card_no added
 
             cursor.execute("""
                 INSERT INTO Credits 
-                (userId, mode, Credits, date, user_iduser)
-                VALUES (%s, 'Deduction', %s, %s, %s)
-            """, (card_no, total_cost, current_time, user_id))
+                (userId, mode, Credits, date, user_iduser, Bike_idBike)
+                VALUES (%s, 'Deduction', %s, %s, %s, %s)
+            """, (card_no, total_cost, current_time, user_id, rental['Bike_idBike']))
             
             connection.commit()
             print(f"Bike {rental['Name']} returned at {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -210,7 +195,6 @@ def return_bike(connection, user_id, card_no):  # 🔧 card_no added
         return False
 
 def main():
-    """Main application loop"""
     print("=== Bike Rental RFID System ===")
     print(f"Rate: {RENTAL_RATE} credits for {RENTAL_DURATION//3600} hours")
     
@@ -241,7 +225,6 @@ def main():
                 time.sleep(1)
                 continue
             
-            # Check active rental
             with connection.cursor() as cursor:
                 cursor.execute("""
                     SELECT COUNT(*) as active_rentals 
